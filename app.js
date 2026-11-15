@@ -96,6 +96,7 @@ function seed() {
     accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
     categories: DEFAULT_CATS.map(c => ({ ...c })),
     txs: [], plans: {},
+    sync: { url: '' }, inbox: [], merchants: {}, cards: {}, imported: [],
   };
 }
 function load() {
@@ -182,6 +183,70 @@ function dayLabel(iso) {
   return parseISO(iso).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }).replace('.', '');
 }
 
+/* ---------- Buzón (Atajos / Apple Pay vía Google Sheets) ---------- */
+// Acepta 25000, "25.000", "$48.900,00", "COP 25,000.00"
+function parseAmount(v) {
+  if (typeof v === 'number') return Math.round(v);
+  let s = String(v || '').replace(/[^\d.,]/g, '');
+  const dec = s.match(/[.,]\d{1,2}$/);
+  if (dec) s = s.slice(0, -dec[0].length);
+  return Math.round(Number(s.replace(/[.,]/g, '')) || 0);
+}
+const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+function findCat(name) {
+  const n = norm(name); if (!n) return null;
+  const gs = S.data.categories.filter(c => c.kind === 'gasto');
+  return gs.find(c => norm(c.name) === n) || gs.find(c => norm(c.name).startsWith(n) || n.startsWith(norm(c.name))) || null;
+}
+function findAcc(name) {
+  const n = norm(name); if (!n) return null;
+  return S.data.accounts.find(a => norm(a.name) === n) || S.data.accounts.find(a => norm(a.name).includes(n) || n.includes(norm(a.name))) || null;
+}
+async function callInbox(body, url = S.data.sync.url) {
+  // text/plain evita la verificación previa de CORS; Apps Script responde con JSON.
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+  return r.json();
+}
+let syncing = false, lastSync = 0;
+async function syncInbox(force = false) {
+  if (!S.data.sync?.url || syncing || !navigator.onLine) return;
+  if (!force && Date.now() - lastSync < 15000) return;
+  syncing = true; lastSync = Date.now();
+  try {
+    const res = await callInbox({ accion: 'pendientes' });
+    if (!res.ok) throw new Error(res.error || 'error');
+    const done = new Set(S.data.imported), ids = [];
+    let added = 0, queued = 0;
+    for (const it of res.items || []) {
+      ids.push(it.id);
+      if (done.has(it.id)) continue;
+      done.add(it.id);
+      const amount = parseAmount(it.monto);
+      if (!amount) continue;
+      const c = findCat(it.categoria) || cat(S.data.merchants[norm(it.comercio)]);
+      const a = findAcc(it.cuenta) || acc(S.data.cards[norm(it.tarjeta)]) || findAcc(it.tarjeta);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(it.fecha) ? it.fecha : today();
+      if (c && (a || !it.tarjeta)) {
+        const account = a || acc(S.data.lastAccount) || S.data.accounts[0];
+        S.data.txs.push({ id: uid(), type: 'gasto', amount, accountId: account.id, categoryId: c.id, date, note: it.nota || it.comercio || '', createdAt: Date.now() });
+        added++;
+      } else {
+        S.data.inbox.push({ id: it.id, amount, comercio: it.comercio || '', tarjeta: it.tarjeta || '', nota: it.nota || '', accountId: a?.id || null, categoryId: c?.id || null, date });
+        queued++;
+      }
+    }
+    S.data.imported = [...done].slice(-300);
+    if (added || queued) { save(); if (!$('#sheet-root').classList.contains('open')) render(); }
+    if (ids.length) callInbox({ accion: 'confirmar', ids }).catch(() => {});
+    if (added) toast(`${added} ${added === 1 ? 'gasto registrado' : 'gastos registrados'} desde Atajos`);
+    else if (queued) toast(`${queued} por revisar 📥`);
+    else if (force) toast('Buzón al día ✓');
+  } catch (e) {
+    console.warn('Buzón:', e);
+    if (force) toast('No se pudo conectar con el buzón');
+  } finally { syncing = false; }
+}
+
 /* ---------- Componentes ---------- */
 const monthNav = () => `<div class="month-nav"><button data-act="prev-month" aria-label="Mes anterior">${ICON.chevL}</button><span>${monthLabel(S.month)}</span><button data-act="next-month" aria-label="Mes siguiente">${ICON.chevR}</button></div>`;
 const header = (title, right = '') => `<header class="large"><h1>${title}</h1>${right}</header>`;
@@ -256,7 +321,9 @@ function viewInicio() {
     ? `<h3 class="sec">Últimos movimientos <button class="link" data-act="tab" data-tab="movimientos">Ver todos</button></h3><div class="group">${recent.map(txRow).join('')}</div>`
     : `<div class="empty-state"><div class="big">🪙</div>Aún no hay movimientos este mes.<br>Toca <b>+</b> para registrar el primero.</div>`;
 
-  return header('Inicio', monthNav()) + hero + tiles + progress + recentHTML;
+  const n = S.data.inbox.length;
+  const inbox = n ? `<button class="card inbox-card" data-act="inbox"><span class="ic g-otro">📥</span><span class="row-main"><span class="row-title"><b>${n} ${n === 1 ? 'gasto' : 'gastos'} por revisar</b></span><span class="row-sub">Llegaron desde Apple Pay o Atajos</span></span>${ICON.chev}</button>` : '';
+  return header('Inicio', monthNav()) + inbox + hero + tiles + progress + recentHTML;
 }
 
 function viewMovimientos() {
@@ -365,6 +432,7 @@ function viewCuentas() {
     <h3 class="sec">Ajustes</h3>
     <div class="group">
       <button class="row plain" data-act="cats"><span class="row-main"><span class="row-title">Categorías</span></span>${ICON.chev}</button>
+      <button class="row plain" data-act="sync-open"><span class="row-main"><span class="row-title">Conexión con Atajos</span><span class="row-sub">${S.data.sync.url ? '<span class="pos">● Conectado</span> · botón de Acción y Apple Pay' : 'Registra gastos desde el botón de Acción'}</span></span>${ICON.chev}</button>
       <button class="row plain" data-act="export"><span class="row-main"><span class="row-title">Exportar copia de seguridad</span><span class="row-sub">Guárdala en iCloud Drive o Archivos</span></span>${ICON.chev}</button>
       <button class="row plain" data-act="import"><span class="row-main"><span class="row-title">Restaurar copia de seguridad</span></span>${ICON.chev}</button>
     </div>
@@ -418,6 +486,7 @@ function openQuick(o = {}) {
     type: o.type || 'gasto', amount: String(o.amount || 0), categoryId: o.categoryId || null,
     accountId: o.accountId || (acc(S.data.lastAccount) ? S.data.lastAccount : first?.id), toAccountId: null,
     date: o.date || today(), note: o.note || '', planItemId: o.planItemId || null,
+    inboxId: o.inboxId || null, merchant: o.merchant || '', tarjeta: o.tarjeta || '',
   };
   openSheet(quickHTML());
 }
@@ -469,6 +538,10 @@ function saveQuick() {
   const i = S.data.txs.findIndex(x => x.id === tx.id);
   if (i >= 0) S.data.txs[i] = tx; else S.data.txs.push(tx);
   S.data.lastAccount = Q.accountId;
+  // Desde la bandeja: sacarlo de "Por revisar" y recordar comercio → categoría y tarjeta → cuenta.
+  if (Q.inboxId) S.data.inbox = S.data.inbox.filter(x => x.id !== Q.inboxId);
+  if (Q.merchant && Q.categoryId) S.data.merchants[norm(Q.merchant)] = Q.categoryId;
+  if (Q.tarjeta && Q.accountId) S.data.cards[norm(Q.tarjeta)] = Q.accountId;
   save(); closeSheet(); render();
   toast(i >= 0 ? 'Cambios guardados' : `${TYPE_LABEL[Q.type]} guardado ✓`);
 }
@@ -477,6 +550,29 @@ function openAjuste(t) {
     <div class="card"><div class="hero-label">${esc(acc(t.accountId)?.name || '')} · ${dayLabel(t.date)}</div><div class="hero-amount">${money(t.amount, true)}</div>
     <div class="hero-sub" style="margin:0">Se creó al ajustar el saldo de la cuenta. No cuenta como ingreso ni gasto.</div></div>
     <button class="danger-btn" data-act="tx-delete" data-id="${t.id}">Eliminar ajuste</button></div>`);
+}
+
+/* ---------- Bandeja "Por revisar" y conexión ---------- */
+function openInbox(replace = false) {
+  const html = sheetHead('Por revisar', 'Cerrar', '') + `<div class="sheet-body">
+    <p class="intro">Toca un gasto para elegir su categoría y guardarlo. La app recordará la categoría de cada comercio para la próxima vez.</p>
+    <div class="group">${S.data.inbox.map(it => `<div class="row">
+      <button class="row-btn" data-act="inbox-open" data-id="${it.id}"><span class="ic g-otro">📥</span>
+        <span class="row-main"><span class="row-title">${esc(it.comercio || it.nota || 'Gasto')}</span><span class="row-sub">${dayLabel(it.date)}${it.tarjeta || it.accountId ? ' · ' + esc(it.tarjeta || acc(it.accountId)?.name || '') : ''}</span></span>
+        <span class="amt">${money(-it.amount)}</span></button>
+      <button class="x-btn" data-act="inbox-discard" data-id="${it.id}" aria-label="Descartar">✕</button></div>`).join('')}</div>
+  </div>`;
+  replace ? setSheet(html) : openSheet(html);
+}
+function openSync() {
+  const url = S.data.sync.url || '';
+  openSheet(sheetHead('Conexión con Atajos', 'Cerrar', '') + `<div class="sheet-body">
+    <p class="intro">Conecta la app con tu buzón de Google Sheets para registrar gastos desde el botón de Acción, o automáticamente al pagar con Apple Pay.</p>
+    <div class="group"><div class="form-row"><input type="url" id="sync-url" class="url-in" placeholder="Pega aquí la URL de conexión" value="${esc(url)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div></div>
+    <button class="btn-primary" style="margin-top:16px" data-act="sync-save">${url ? 'Probar y guardar' : 'Conectar'}</button>
+    ${url ? `<button class="btn-secondary" data-act="sync-now">Revisar buzón ahora</button><button class="danger-btn" data-act="sync-off">Desconectar</button>` : ''}
+    <p class="foot-note">Tus gastos pasan por una hoja de cálculo en tu propia cuenta de Google y la app los trae al abrirse.</p>
+  </div>`);
 }
 
 /* ---------- Gasto fijo (plan) ---------- */
@@ -719,6 +815,39 @@ const ACTIONS = {
     save(); render(); openCats(true);
   },
 
+  // Bandeja y conexión
+  inbox: () => openInbox(),
+  'inbox-open': el => {
+    const it = S.data.inbox.find(x => x.id === el.dataset.id); if (!it) return;
+    openQuick({ type: 'gasto', amount: it.amount, categoryId: it.categoryId, accountId: it.accountId || undefined,
+      note: it.comercio || it.nota, date: it.date, inboxId: it.id, merchant: it.comercio, tarjeta: it.tarjeta });
+  },
+  'inbox-discard': el => {
+    S.data.inbox = S.data.inbox.filter(x => x.id !== el.dataset.id);
+    save(); render();
+    S.data.inbox.length ? openInbox(true) : closeSheet();
+  },
+  'sync-open': () => openSync(),
+  'sync-save': async el => {
+    const url = $('#sync-url').value.trim();
+    if (!/^https:\/\/script\.google(usercontent)?\.com\/.+\?k=.+/.test(url)) return toast('Esa URL no parece válida');
+    el.textContent = 'Probando…';
+    try {
+      const r = await callInbox({ accion: 'ping' }, url);
+      if (!r.ok) throw new Error(r.error);
+      S.data.sync.url = url; save(); closeSheet(); render();
+      toast('Conectado ✓'); syncInbox(true);
+    } catch (e) {
+      el.textContent = 'Probar y guardar';
+      toast(e.message === 'clave' ? 'La clave de la URL no coincide' : 'No se pudo conectar');
+    }
+  },
+  'sync-now': () => { closeSheet(); syncInbox(true); },
+  'sync-off': () => {
+    if (!confirm('¿Desconectar el buzón? Los gastos ya importados se mantienen.')) return;
+    S.data.sync.url = ''; save(); closeSheet(); render();
+  },
+
   // Datos
   export: () => exportData(),
   import: () => $('#import-file').click(),
@@ -778,6 +907,8 @@ S.data = load();
 render();
 if (!S.data.onboarded) openOnboarding();
 navigator.storage?.persist?.();
+syncInbox();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncInbox(); });
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

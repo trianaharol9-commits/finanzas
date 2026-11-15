@@ -64,7 +64,7 @@ button.row:active, label.row:active { background: var(--fill); }
 .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-sub { font-size: 13px; color: var(--label2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.add { color: var(--blue); }
-.row .chev { color: var(--label3); width: 14px; height: 14px; flex: none; }
+.chev { color: var(--label3); width: 14px; height: 14px; flex: none; }
 .ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; flex: none; }
 .ic.letter { color: #fff; font-weight: 600; font-size: 16px; }
 .amt { font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
@@ -114,6 +114,14 @@ button.row:active, label.row:active { background: var(--fill); }
 .pill.pay { background: var(--blue); color: #fff; }
 .pill.done { color: var(--green); background: color-mix(in srgb, var(--green) 15%, transparent); }
 .mini-bar { height: 4px; margin-top: 6px; max-width: 160px; }
+
+/* ---------- Bandeja y conexión ---------- */
+.inbox-card { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; margin-bottom: 12px;
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent); }
+.inbox-card:active { opacity: .7; }
+.row-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; }
+.x-btn { width: 30px; height: 30px; border-radius: 50%; background: var(--fill); color: var(--label2); font-size: 13px; flex: none; }
+.url-in { width: 100%; border: 0; background: transparent; outline: none; font-size: 15px; padding: 8px 0; }
 
 /* ---------- Formularios ---------- */
 .form-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 16px; position: relative; }
