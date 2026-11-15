@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Finanzas</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Finanzas">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="main"></main>
+
+  <nav class="tabbar" aria-label="Secciones">
+    <button class="tab" data-act="tab" data-tab="inicio"><span data-icon="home"></span>Inicio</button>
+    <button class="tab" data-act="tab" data-tab="movimientos"><span data-icon="list"></span>Movimientos</button>
+    <button class="tab plus-tab" data-act="add" aria-label="Registrar movimiento"><span class="plus" data-icon="plus"></span></button>
+    <button class="tab" data-act="tab" data-tab="plan"><span data-icon="pie"></span>Plan</button>
+    <button class="tab" data-act="tab" data-tab="cuentas"><span data-icon="card"></span>Cuentas</button>
+  </nav>
+
+  <div id="sheet-root"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+
+  <script src="app.js"></script>
+</body>
+</html>
